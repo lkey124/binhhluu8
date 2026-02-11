@@ -22,6 +22,9 @@ const BackIcon = () => (
 const NextIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
 );
+const XIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+);
 
 interface GameCardProps {
   children?: React.ReactNode;
@@ -96,6 +99,7 @@ const App = () => {
 
   // --- Online Mode State ---
   const [gameMode, setGameMode] = useState<'OFFLINE' | 'ONLINE_HOST' | 'ONLINE_GUEST'>('OFFLINE');
+  const [isModeSelected, setIsModeSelected] = useState(false); // Tracks if user has picked Offline/Online to show Config
   const [roomId, setRoomId] = useState('');
   const [guestName, setGuestName] = useState('');
   const [connectionStatus, setConnectionStatus] = useState('DISCONNECTED'); // CONNECTING, CONNECTED
@@ -205,7 +209,8 @@ const App = () => {
           const code = await peerService.createRoom();
           setRoomId(code);
           setGameMode('ONLINE_HOST');
-          setPhase(GamePhase.NAME_SETUP); // Host Lobby
+          setPhase(GamePhase.SETUP); // Stay in SETUP so we can configure the game
+          setIsModeSelected(true); // Move to configuration screen
           setPlayers([{
               seatIndex: 0,
               name: "Chủ Phòng",
@@ -231,7 +236,7 @@ const App = () => {
               type: 'JOIN_REQUEST',
               payload: { name: guestName, peerId: peerService['peer']?.id }
           });
-          setPhase(GamePhase.NAME_SETUP); // Waiting in Lobby
+          setPhase(GamePhase.SETUP); // Waiting in Lobby (handled by renderSetup)
       } catch (e) {
           alert("Không thể vào phòng: " + e);
           setConnectionStatus('DISCONNECTED');
@@ -455,6 +460,7 @@ const App = () => {
       setPlayers([]);
       setWinner(null);
       setEliminatedData(null);
+      setIsModeSelected(false);
       // Keep Online connection if online? No, reset to menu
       if (gameMode !== 'OFFLINE') {
           peerService.destroy();
@@ -505,12 +511,12 @@ const App = () => {
     
     // Host or Offline Setup
     return (
-    <div className="w-full max-w-md mx-auto bg-red-950/60 p-8 rounded-3xl border border-yellow-600/30 backdrop-blur-xl shadow-2xl">
-        {gameMode === 'OFFLINE' && !roomId ? (
+    <div className="w-full max-w-md mx-auto bg-red-950/60 p-8 rounded-3xl border border-yellow-600/30 backdrop-blur-xl shadow-2xl relative">
+        {!isModeSelected ? (
              // Initial Choice
              <div className="space-y-4">
                  <h2 className="text-3xl font-bold mb-6 text-yellow-300 text-center font-hand">Chọn Chế Độ</h2>
-                 <Button onClick={() => setGameMode('OFFLINE')}>Chơi Offline (Chuyền tay)</Button>
+                 <Button onClick={() => { setGameMode('OFFLINE'); setIsModeSelected(true); }}>Chơi Offline (Chuyền tay)</Button>
                  <Button onClick={initHost} variant="secondary">Tạo Phòng Online</Button>
                  <div className="pt-4 border-t border-yellow-700/30">
                      <input 
@@ -533,6 +539,13 @@ const App = () => {
         ) : (
             // Config Screen (Host/Offline)
             <div className="space-y-6">
+              <button 
+                  onClick={() => { setIsModeSelected(false); if (gameMode === 'ONLINE_HOST') resetGame(); }} 
+                  className="absolute top-4 right-4 text-yellow-500 hover:text-white"
+              >
+                  <XIcon />
+              </button>
+              
               <h2 className="text-3xl font-bold text-yellow-300 text-center font-hand">
                   {gameMode === 'OFFLINE' ? 'Thiết Lập' : `Phòng: ${roomId}`}
               </h2>
@@ -553,8 +566,8 @@ const App = () => {
               ) : (
                   <div className="bg-black/30 p-4 rounded-xl">
                       <p className="text-center mb-2">Đã có {players.length} người tham gia</p>
-                      <ul className="text-xs text-center text-yellow-200/60">
-                          {players.map(p => p.name).join(', ')}
+                      <ul className="text-xs text-center text-yellow-200/60 flex flex-wrap justify-center gap-2">
+                          {players.map((p, i) => <li key={i} className="bg-red-900/50 px-2 py-1 rounded">{p.name}</li>)}
                       </ul>
                   </div>
               )}
