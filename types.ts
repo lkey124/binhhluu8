@@ -2,7 +2,6 @@ export enum GamePhase {
   PROFILE = 'PROFILE',
   WELCOME = 'WELCOME',
   HOST_SETUP = 'HOST_SETUP',
-  JOIN_ROOM = 'JOIN_ROOM',
   PLAYING = 'PLAYING',
 }
 
@@ -11,12 +10,20 @@ export interface UserProfile {
   avatar: string;
 }
 
+export enum Role {
+  CIVILIAN = 'CIVILIAN', // Dân thường
+  LIAR = 'LIAR',         // Kẻ nói dối
+  WHITE_HAT = 'WHITE_HAT' // Mũ trắng (Không biết gì cả)
+}
+
 export interface GameData {
   topic: string;
   word: string;
-  liarIndex: number; // 1-based index
   totalPlayers: number;
+  liarCount: number;
+  whiteHatCount: number;
   timestamp: number;
+  // Roles are derived deterministically from the code/seed, not stored explicitly
 }
 
 export interface TopicCategory {
