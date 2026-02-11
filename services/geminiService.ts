@@ -1,22 +1,20 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const apiKey = process.env.API_KEY || '';
-
 export const generateAiWord = async (customTopic: string): Promise<{ word: string; category: string } | null> => {
-  if (!apiKey) {
+  if (!process.env.API_KEY) {
     console.warn("API Key not found");
     return null;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     const prompt = customTopic 
       ? `Hãy đưa ra 1 từ khoá tiếng Việt thuộc chủ đề "${customTopic}" để chơi trò Ai là kẻ nói dối. Từ khoá nên phổ biến.`
       : `Hãy đưa ra 1 từ khoá tiếng Việt ngẫu nhiên (danh từ) và chủ đề của nó để chơi trò Ai là kẻ nói dối. Chủ đề nên thú vị.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
         responseMimeType: "application/json",

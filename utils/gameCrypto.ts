@@ -131,8 +131,8 @@ export const decodeGameData = (code: string): GameData | null => {
   }
 };
 
-// Deterministically get roles based on the Room Code (Seed)
-export const getRolesForGame = (gameData: GameData, roomCode: string): Role[] => {
+// Deterministically get roles based on the Room Code + Round Number
+export const getRolesForGame = (gameData: GameData, roomCode: string, roundNumber: number = 1): Role[] => {
   // Create pool of roles
   const roles: Role[] = [];
   
@@ -156,6 +156,9 @@ export const getRolesForGame = (gameData: GameData, roomCode: string): Role[] =>
       seed |= 0;
     }
   }
+
+  // Modify seed by round number to ensure different roles per round
+  seed = (seed + (roundNumber * 997)) % 233280;
 
   // Shuffle using seed
   const rng = new SeededRNG(seed);

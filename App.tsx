@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GamePhase, GameData, UserProfile, Role } from './types';
+import { GamePhase, TurnPhase, GameData, UserProfile, Role, PlayerState } from './types';
 import { STATIC_TOPICS, ZODIAC_AVATARS } from './constants';
 import { encodeGameData, decodeGameData, getRolesForGame, getRandomWord } from './utils/gameCrypto';
 import { generateAiWord } from './services/geminiService';
@@ -12,8 +12,11 @@ const CopyIcon = () => (
 const MagicIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L12 3Z"></path></svg>
 );
-const SettingsIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+const EyeIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+);
+const TimerIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
 );
 
 interface HostConfig {
@@ -43,12 +46,31 @@ const App = () => {
   const [generatedRoomCode, setGeneratedRoomCode] = useState<string>('');
   const [joinCode, setJoinCode] = useState('');
   const [currentGame, setCurrentGame] = useState<GameData | null>(null);
+  const [isHost, setIsHost] = useState(false);
   
   // Gameplay State
+  const [turnPhase, setTurnPhase] = useState<TurnPhase>(TurnPhase.LOBBY);
+  const [roundNumber, setRoundNumber] = useState(1);
   const [mySeatIndex, setMySeatIndex] = useState<number | null>(null);
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [showIdentity, setShowIdentity] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  
+  // New State for Timer and Role Review
+  const [timeLeft, setTimeLeft] = useState(45);
+  const [isReviewingRole, setIsReviewingRole] = useState(false);
+
+  // Turn Logic
+  const [players, setPlayers] = useState<PlayerState[]>([]);
+  const [turnOrder, setTurnOrder] = useState<number[]>([]);
+  const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
+  const [eliminatedData, setEliminatedData] = useState<{seat: number, role: Role} | null>(null);
+  const [winner, setWinner] = useState<'CIVILIAN' | 'BAD_GUYS' | 'WHITE_HAT' | null>(null);
+  const [selectedVoteCandidate, setSelectedVoteCandidate] = useState<number | null>(null);
+  
+  // White Hat Logic
+  const [isWhiteHatGuessing, setIsWhiteHatGuessing] = useState(false);
+  const [whiteHatGuess, setWhiteHatGuess] = useState('');
 
   // Load profile from local storage
   useEffect(() => {
@@ -58,6 +80,47 @@ const App = () => {
       setPhase(GamePhase.WELCOME);
     }
   }, []);
+
+  // Initialize players when game loads
+  useEffect(() => {
+    if (currentGame) {
+      const initialPlayers: PlayerState[] = Array.from({ length: currentGame.totalPlayers }, (_, i) => ({
+        seatIndex: i,
+        status: 'ALIVE'
+      }));
+      setPlayers(initialPlayers);
+    }
+  }, [currentGame]);
+
+  // Timer Logic
+  useEffect(() => {
+    let interval: any;
+    if (turnPhase === TurnPhase.DESCRIBING && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [turnPhase, timeLeft]);
+
+  // --- Helper: Get Player Display Info ---
+  const getPlayerDisplay = (seatIdx: number) => {
+    // If it's me, return my actual profile
+    if (seatIdx === mySeatIndex && userProfile) {
+        return { 
+            name: `${userProfile.name} (Tôi)`, 
+            avatar: userProfile.avatar,
+            isMe: true 
+        };
+    }
+    // If it's someone else, use deterministic avatar based on seat index
+    const avatar = ZODIAC_AVATARS[seatIdx % ZODIAC_AVATARS.length];
+    return { 
+        name: `Ghế ${seatIdx + 1}`, 
+        avatar: avatar,
+        isMe: false 
+    };
+  };
 
   // --- Actions ---
 
@@ -70,7 +133,6 @@ const App = () => {
   };
 
   const handleCreateRoom = async () => {
-    // Validate config
     if (hostConfig.liarCount + hostConfig.whiteHatCount >= hostConfig.totalPlayers) {
         alert("Tổng số Kẻ nói dối và Mũ trắng phải nhỏ hơn tổng số người chơi!");
         return;
@@ -80,7 +142,6 @@ const App = () => {
     let word = '';
     let category = '';
 
-    // Determine Topic & Word
     if (hostConfig.customTopic.trim()) {
        const aiResult = await generateAiWord(hostConfig.customTopic);
        if (aiResult) {
@@ -110,27 +171,125 @@ const App = () => {
     setGeneratedRoomCode(code);
     setCurrentGame(data);
     setIsGenerating(false);
+    setIsHost(true);
     setPhase(GamePhase.HOST_SETUP);
+    setRoundNumber(1);
   };
 
   const handleJoinRoom = () => {
     if (!joinCode.trim()) return;
     const data = decodeGameData(joinCode);
     if (data) {
-      setGeneratedRoomCode(joinCode); // Important for RNG seeding
+      setGeneratedRoomCode(joinCode);
       setCurrentGame(data);
+      setIsHost(false);
       setPhase(GamePhase.PLAYING);
+      setTurnPhase(TurnPhase.LOBBY);
+      setRoundNumber(1);
     } else {
       alert("Mã phòng không hợp lệ hoặc đã hết hạn!");
     }
   };
 
   const handleSelectSeat = (seatIndex: number) => {
-    if (!currentGame || !generatedRoomCode) return;
-    const roles = getRolesForGame(currentGame, generatedRoomCode);
-    const assignedRole = roles[seatIndex];
-    setMySeatIndex(seatIndex + 1);
-    setMyRole(assignedRole);
+    if (mySeatIndex !== null && mySeatIndex !== seatIndex) {
+        if (!confirm("Bạn muốn đổi ghế?")) return;
+    }
+    setMySeatIndex(seatIndex);
+  };
+
+  const startGameRound = () => {
+    if (mySeatIndex === null) {
+        alert("Bạn chưa chọn ghế!");
+        return;
+    }
+    if (!currentGame) return;
+
+    const roles = getRolesForGame(currentGame, generatedRoomCode, roundNumber);
+    setMyRole(roles[mySeatIndex]);
+    
+    setTurnPhase(TurnPhase.REVEAL);
+    setPlayers(Array.from({ length: currentGame.totalPlayers }, (_, i) => ({ seatIndex: i, status: 'ALIVE' })));
+    setWinner(null);
+    setEliminatedData(null);
+    setShowIdentity(false);
+    setIsWhiteHatGuessing(false);
+    setWhiteHatGuess('');
+    setSelectedVoteCandidate(null);
+  };
+
+  const finishRevealing = () => {
+    const aliveSeats = players.filter(p => p.status === 'ALIVE').map(p => p.seatIndex);
+    const startIdx = (roundNumber * 7) % aliveSeats.length; 
+    
+    const ordered = [
+        ...aliveSeats.slice(startIdx),
+        ...aliveSeats.slice(0, startIdx)
+    ];
+    setTurnOrder(ordered);
+    setCurrentTurnIndex(0);
+    setTurnPhase(TurnPhase.DESCRIBING);
+    setTimeLeft(45); // Init timer
+  };
+
+  const nextTurn = () => {
+    if (currentTurnIndex < turnOrder.length - 1) {
+        setCurrentTurnIndex(prev => prev + 1);
+        setTimeLeft(45); // Reset timer for next player
+    } else {
+        setTurnPhase(TurnPhase.VOTING);
+        setSelectedVoteCandidate(null);
+    }
+  };
+
+  const handleEliminate = (targetSeatIndex: number) => {
+    if (!currentGame) return;
+    
+    const roles = getRolesForGame(currentGame, generatedRoomCode, roundNumber);
+    const targetRole = roles[targetSeatIndex];
+
+    setEliminatedData({ seat: targetSeatIndex, role: targetRole });
+    
+    const newPlayers = players.map(p => 
+        p.seatIndex === targetSeatIndex ? { ...p, status: 'ELIMINATED' as const, role: targetRole } : p
+    );
+    setPlayers(newPlayers);
+    setTurnPhase(TurnPhase.ELIMINATION);
+    
+    checkWinCondition(newPlayers, roles);
+  };
+
+  const checkWinCondition = (currentPlayers: PlayerState[], allRoles: Role[]) => {
+      if (!currentGame) return;
+      
+      const alivePlayers = currentPlayers.filter(p => p.status === 'ALIVE');
+      const aliveRoles = alivePlayers.map(p => allRoles[p.seatIndex]);
+      
+      const badGuysCount = aliveRoles.filter(r => r === Role.LIAR || r === Role.WHITE_HAT).length;
+      const civiliansCount = aliveRoles.filter(r => r === Role.CIVILIAN).length;
+
+      if (badGuysCount === 0) {
+          setWinner('CIVILIAN');
+      } else if (badGuysCount >= civiliansCount) {
+          setWinner('BAD_GUYS');
+      }
+  };
+
+  const handleWhiteHatGuess = () => {
+      if (!currentGame) return;
+      if (whiteHatGuess.toLowerCase().trim() === currentGame.word.toLowerCase().trim()) {
+          setWinner('WHITE_HAT');
+      } else {
+          alert("Sai rồi! Bạn đã bị loại.");
+          if (mySeatIndex !== null) handleEliminate(mySeatIndex);
+          setIsWhiteHatGuessing(false);
+      }
+  };
+
+  const playAgain = () => {
+      setRoundNumber(prev => prev + 1);
+      setTurnPhase(TurnPhase.LOBBY);
+      setMyRole(null);
   };
 
   const copyToClipboard = () => {
@@ -147,7 +306,7 @@ const App = () => {
     setMySeatIndex(null);
     setMyRole(null);
     setShowIdentity(false);
-    // Reset defaults
+    setIsHost(false);
     setHostConfig(prev => ({ ...prev, customTopic: '', liarCount: 1, whiteHatCount: 0 }));
   };
 
@@ -202,13 +361,26 @@ const App = () => {
     </footer>
   );
 
-  const renderGameCard = (children: React.ReactNode) => (
-    <div className="max-w-2xl w-full mx-auto bg-red-950/80 p-8 rounded-3xl border-2 border-yellow-600/30 backdrop-blur-md shadow-2xl relative animate-fade-in">
+  const renderGameCard = (children: React.ReactNode, fullWidth = false) => (
+    <div className={`${fullWidth ? 'max-w-4xl' : 'max-w-2xl'} w-full mx-auto bg-red-950/80 p-8 rounded-3xl border-2 border-yellow-600/30 backdrop-blur-md shadow-2xl relative animate-fade-in transition-all`}>
         <div className="absolute -top-3 -left-3 text-4xl transform -rotate-12">🌸</div>
         <div className="absolute -bottom-3 -right-3 text-4xl transform rotate-12">🌸</div>
         {children}
     </div>
   );
+
+  const FloatingRoleButton = () => {
+    if (turnPhase === TurnPhase.LOBBY || turnPhase === TurnPhase.GAME_OVER || turnPhase === TurnPhase.REVEAL) return null;
+    return (
+        <button
+            onClick={() => setIsReviewingRole(true)}
+            className="fixed bottom-24 right-6 w-14 h-14 bg-red-900 border-2 border-yellow-500 rounded-full flex items-center justify-center shadow-2xl z-40 hover:scale-110 transition-transform"
+            title="Xem lại vai trò"
+        >
+            <span className="text-yellow-400"><EyeIcon /></span>
+        </button>
+    );
+  };
 
   // --- Screens ---
 
@@ -261,7 +433,6 @@ const App = () => {
 
   const renderWelcomeDashboard = () => (
     <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-12 items-center animate-fade-in">
-      {/* Left: Intro */}
       <div className="text-center lg:text-left space-y-6">
         <div className="inline-block px-4 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/50 text-yellow-400 text-sm font-bold tracking-widest uppercase">
           Happy Lunar New Year
@@ -276,12 +447,10 @@ const App = () => {
         </div>
       </div>
 
-      {/* Right: Setup */}
       <div className="w-full max-w-md mx-auto bg-red-950/60 p-8 rounded-3xl border border-yellow-600/30 backdrop-blur-xl shadow-2xl">
         <h2 className="text-2xl font-bold mb-6 text-yellow-300 border-b border-yellow-800/50 pb-4">Thiết lập phòng</h2>
         
         <div className="space-y-6">
-          {/* Player Count */}
           <div>
              <div className="flex justify-between items-center mb-2">
                <label className="text-sm font-bold text-yellow-500 uppercase">Số người chơi</label>
@@ -297,7 +466,6 @@ const App = () => {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-             {/* Liar Count */}
              <div className="bg-red-900/40 p-3 rounded-xl border border-red-800">
                <label className="text-xs font-bold text-red-400 uppercase block mb-1">Kẻ Nói Dối</label>
                <div className="flex items-center justify-between">
@@ -311,7 +479,6 @@ const App = () => {
                </div>
              </div>
              
-             {/* White Hat Count */}
              <div className="bg-white/5 p-3 rounded-xl border border-white/10">
                <label className="text-xs font-bold text-gray-300 uppercase block mb-1">Mũ Trắng</label>
                <div className="flex items-center justify-between">
@@ -402,51 +569,70 @@ const App = () => {
     </div>
   );
 
-  const renderPlaying = () => {
-    if (!currentGame) return null;
-
-    // Phase 1: Picking a seat (Lobby)
-    if (mySeatIndex === null) {
-      return renderGameCard(
+  const renderLobby = () => (
+    renderGameCard(
         <div className="flex flex-col gap-6">
           <div className="text-center">
-            <h2 className="text-3xl font-bold text-yellow-400 mb-2 font-serif">Phòng Chờ</h2>
+            <h2 className="text-3xl font-bold text-yellow-400 mb-2 font-serif">Phòng Chờ (Vòng {roundNumber})</h2>
             
             <div className="bg-black/20 px-6 py-3 rounded-xl border border-yellow-500/30 mb-4 inline-block">
                 <p className="text-yellow-100 uppercase tracking-widest text-xs mb-1">Tổng số người chơi</p>
-                <p className="text-4xl font-bold text-yellow-400">{currentGame.totalPlayers}</p>
+                <p className="text-4xl font-bold text-yellow-400">{currentGame?.totalPlayers}</p>
             </div>
             
-            <p className="text-yellow-200/60 mb-2">Đợi đủ số lượng người chơi vào phòng rồi hãy chọn ghế!</p>
-            <div className="bg-red-900/50 text-red-200 text-xs px-3 py-2 rounded-lg inline-block border border-red-800">
-               ⚠️ Hãy hỏi bạn bè trước khi chọn để không bị trùng ghế!
-            </div>
+            <p className="text-yellow-200/60 mb-2">Mọi người hãy chọn ghế và chờ đủ người.</p>
           </div>
 
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-4 max-h-[400px] overflow-y-auto p-2">
-            {Array.from({ length: currentGame.totalPlayers }).map((_, idx) => {
+            {Array.from({ length: currentGame?.totalPlayers || 0 }).map((_, idx) => {
+              const displayInfo = getPlayerDisplay(idx);
+              const isSelected = mySeatIndex === idx;
+              
               return (
                 <button
                   key={idx}
                   onClick={() => handleSelectSeat(idx)}
-                  className="aspect-square bg-red-900/40 border-2 border-yellow-800 hover:border-yellow-400 rounded-xl flex flex-col items-center justify-center gap-1 transition-all group hover:bg-red-800/60"
+                  className={`aspect-square border-2 rounded-xl flex flex-col items-center justify-center gap-1 transition-all group ${
+                      isSelected 
+                      ? 'bg-yellow-500/20 border-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.3)]' 
+                      : 'bg-red-900/40 border-yellow-800 hover:border-yellow-400 hover:bg-red-800/60'
+                  }`}
                 >
-                   <span className="text-2xl opacity-50 group-hover:opacity-100">🪑</span>
-                   <span className="font-bold text-yellow-600 group-hover:text-yellow-200">Ghế {idx + 1}</span>
+                   <span className="text-2xl">{displayInfo.isMe ? displayInfo.avatar : '🪑'}</span>
+                   <span className={`font-bold ${isSelected ? 'text-yellow-300' : 'text-yellow-600 group-hover:text-yellow-200'}`}>
+                       {displayInfo.isMe ? 'Tôi' : `Ghế ${idx + 1}`}
+                   </span>
                 </button>
               );
             })}
           </div>
           
+          {mySeatIndex !== null && (
+            <div className="animate-fade-in mt-2">
+                <Button 
+                    onClick={startGameRound} 
+                    className="text-lg uppercase tracking-wide"
+                    variant={isHost ? 'primary' : 'secondary'}
+                >
+                    {isHost ? "👑 BẮT ĐẦU GAME" : "VÀO GAME"}
+                </Button>
+                <p className="text-center text-xs text-yellow-500/70 mt-2 italic">
+                    {isHost 
+                     ? "*Bạn là chủ phòng. Hãy hô 'Bắt đầu' để mọi người cùng vào!" 
+                     : "*Chờ chủ phòng hiệu lệnh rồi bấm nút này"}
+                </p>
+            </div>
+          )}
+          
           <div className="flex justify-between items-center border-t border-yellow-900/50 pt-4">
-             <div className="text-xs text-yellow-500">Mã phòng: {generatedRoomCode}</div>
+             <div className="text-xs text-yellow-500">Mã: {generatedRoomCode}</div>
              <Button variant="ghost" onClick={resetGame} className="w-auto px-4 py-2 text-sm">Thoát</Button>
           </div>
         </div>
-      );
-    }
+    )
+  );
 
-    // Phase 2: Role Reveal (Locked in)
+  const renderReveal = () => {
     let roleTitle = "";
     let roleDescription = "";
     let cardColor = "";
@@ -459,7 +645,7 @@ const App = () => {
         icon = "👺";
     } else if (myRole === Role.WHITE_HAT) {
         roleTitle = "Mũ Trắng";
-        roleDescription = "Bạn không biết gì cả. Người chơi khác cũng không biết bạn là ai.";
+        roleDescription = "Bạn không biết gì cả. Bạn cũng không bị nghi ngờ.";
         cardColor = "bg-gradient-to-br from-gray-200 to-gray-400 border-white text-gray-900";
         icon = "👻";
     } else {
@@ -472,15 +658,8 @@ const App = () => {
     return renderGameCard(
       <div className="flex flex-col items-center min-h-[500px] justify-between py-4">
         <div className="text-center w-full">
-          <div className="flex items-center justify-center gap-3 mb-6 bg-black/20 py-2 rounded-full w-fit mx-auto px-6 border border-yellow-900/30">
-            <span className="text-2xl">{userProfile?.avatar}</span>
-            <span className="text-sm font-bold text-yellow-500 uppercase tracking-widest">
-              {userProfile?.name} • Ghế #{mySeatIndex}
-            </span>
-          </div>
-          
-          <h2 className="text-4xl font-bold text-yellow-200 mb-2 font-serif drop-shadow-lg">{currentGame.topic}</h2>
-          <p className="text-yellow-500/60 text-sm italic">Nhấn vào thẻ để lật</p>
+            <h2 className="text-3xl font-bold text-yellow-200 mb-2 font-serif">{currentGame?.topic}</h2>
+            <p className="text-yellow-500/60 text-sm">Chạm vào thẻ để xem vai trò</p>
         </div>
 
         <div 
@@ -488,7 +667,6 @@ const App = () => {
           onClick={() => setShowIdentity(!showIdentity)}
         >
           <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${showIdentity ? 'rotate-y-180' : ''}`} style={{ transformStyle: 'preserve-3d', transform: showIdentity ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
-            
             {/* Front */}
             <div 
               className="absolute w-full h-full bg-gradient-to-b from-red-800 to-red-950 rounded-3xl shadow-2xl flex flex-col items-center justify-center border-[6px] border-yellow-600/50"
@@ -514,7 +692,7 @@ const App = () => {
                 {myRole === Role.CIVILIAN ? (
                     <>
                         <h3 className="text-lg font-bold text-yellow-400/80 mb-2 uppercase tracking-wide">Từ khoá</h3>
-                        <p className="text-4xl font-extrabold text-white uppercase break-words leading-tight drop-shadow-md">{currentGame.word}</p>
+                        <p className="text-4xl font-extrabold text-white uppercase break-words leading-tight drop-shadow-md">{currentGame?.word}</p>
                     </>
                 ) : (
                     <>
@@ -527,10 +705,280 @@ const App = () => {
           </div>
         </div>
 
-        <div className="w-full flex justify-center gap-4">
-          <Button variant="danger" onClick={resetGame} className="max-w-xs">Kết thúc</Button>
-        </div>
+        <Button onClick={finishRevealing} className="max-w-xs">Đã Xem Xong (Vào Vòng Chơi)</Button>
+        <p className="text-xs text-yellow-500/50 mt-2">*Chỉ bấm khi bạn đã nhớ rõ vai trò của mình</p>
       </div>
+    );
+  };
+
+  const renderDescribing = () => {
+      const currentSeat = turnOrder[currentTurnIndex];
+      const isMyTurn = mySeatIndex === currentSeat;
+      const displayInfo = getPlayerDisplay(currentSeat);
+
+      return renderGameCard(
+          <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 relative">
+              <div className="absolute top-0 right-0">
+                  <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${timeLeft <= 10 ? 'bg-red-900 border-red-500 animate-pulse' : 'bg-black/30 border-yellow-500/30'}`}>
+                      <span className="text-yellow-400"><TimerIcon /></span>
+                      <span className={`font-mono font-bold text-xl ${timeLeft <= 10 ? 'text-red-400' : 'text-yellow-100'}`}>{timeLeft}s</span>
+                  </div>
+              </div>
+
+              <div className="text-center w-full mt-4">
+                  <div className="text-sm font-bold text-yellow-500 uppercase tracking-widest mb-6">Vòng Miêu Tả</div>
+                  
+                  {/* Avatar Big Display */}
+                  <div className={`
+                    w-32 h-32 mx-auto rounded-full flex items-center justify-center text-7xl shadow-2xl mb-4 transition-all duration-500
+                    ${isMyTurn 
+                        ? 'bg-yellow-500/20 border-4 border-yellow-400 scale-110 shadow-[0_0_30px_rgba(234,179,8,0.4)]' 
+                        : 'bg-black/30 border-4 border-yellow-800/50'
+                    }
+                  `}>
+                      <div className="animate-bounce-slow">{displayInfo.avatar}</div>
+                  </div>
+
+                  {/* Turn Info */}
+                  <p className="text-yellow-200/60 text-sm mb-1 uppercase tracking-wider">Lượt của</p>
+                  <h2 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-br from-yellow-100 to-yellow-500 drop-shadow-sm font-serif">
+                      {displayInfo.name}
+                  </h2>
+                  
+                  {isMyTurn && <p className="text-green-400 font-bold mt-2 animate-pulse text-lg">👉 Đến lượt bạn!</p>}
+              </div>
+
+              <div className="flex flex-col gap-3 w-full max-w-xs mt-4">
+                  <Button onClick={nextTurn}>
+                      {isMyTurn ? "Tôi đã xong" : "Qua lượt"}
+                  </Button>
+                  
+                  {myRole === Role.WHITE_HAT && !isWhiteHatGuessing && (
+                      <Button variant="secondary" onClick={() => setIsWhiteHatGuessing(true)}>
+                          🕵️ Tôi là Mũ Trắng (Đoán từ)
+                      </Button>
+                  )}
+              </div>
+          </div>
+      )
+  };
+
+  const renderRoleReviewModal = () => {
+      if (!isReviewingRole) return null;
+      
+      let roleName = "Dân Thường";
+      let roleDesc = `Từ khoá: ${currentGame?.word}`;
+      if (myRole === Role.LIAR) { roleName = "Kẻ Nói Dối"; roleDesc = "Bạn không biết từ khoá"; }
+      if (myRole === Role.WHITE_HAT) { roleName = "Mũ Trắng"; roleDesc = "Bạn không biết gì cả"; }
+
+      return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-red-950 border-2 border-yellow-500 rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center relative">
+                  <button 
+                      onClick={() => setIsReviewingRole(false)}
+                      className="absolute top-2 right-2 text-yellow-500 hover:text-white p-2"
+                  >
+                      ✕
+                  </button>
+                  <h3 className="text-sm uppercase tracking-widest text-yellow-500 mb-2">Vai trò của bạn</h3>
+                  <h2 className="text-3xl font-extrabold text-white mb-2">{roleName}</h2>
+                  <p className="text-yellow-200/80 text-lg font-bold">{roleDesc}</p>
+              </div>
+          </div>
+      );
+  };
+
+  const renderVoting = () => (
+      renderGameCard(
+          <div className="flex flex-col h-full gap-4">
+              <div className="text-center">
+                  <h2 className="text-3xl font-bold text-red-400 mb-1 uppercase">Biểu Quyết</h2>
+                  <p className="text-yellow-200/60 text-sm mb-4">
+                      Thống nhất và chọn người bị loại (nhiều phiếu nhất)
+                  </p>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto max-h-[400px] px-2">
+                  {players.map((p) => {
+                      const isAlive = p.status === 'ALIVE';
+                      const displayInfo = getPlayerDisplay(p.seatIndex);
+                      const isSelected = selectedVoteCandidate === p.seatIndex;
+
+                      return (
+                          <button
+                            key={p.seatIndex}
+                            disabled={!isAlive}
+                            onClick={() => isAlive && setSelectedVoteCandidate(p.seatIndex)}
+                            className={`
+                                relative p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all duration-200 h-32
+                                ${!isAlive ? 'bg-black/40 border-gray-800 opacity-40 grayscale cursor-not-allowed' : ''}
+                                ${isAlive && !isSelected ? 'bg-red-900/40 border-yellow-800/50 hover:bg-red-800/60 hover:border-yellow-600' : ''}
+                                ${isAlive && isSelected ? 'bg-red-800 border-yellow-400 shadow-[0_0_20px_rgba(234,179,8,0.3)] scale-105 z-10' : ''}
+                            `}
+                          >
+                              <div className="text-4xl mb-1">{isAlive ? displayInfo.avatar : '💀'}</div>
+                              <span className={`font-bold text-sm ${isSelected ? 'text-yellow-200' : 'text-yellow-100/80'}`}>
+                                  {displayInfo.name}
+                              </span>
+                          </button>
+                      )
+                  })}
+              </div>
+
+             <div className="mt-4 flex flex-col gap-3">
+                 {selectedVoteCandidate !== null ? (
+                     <div className="animate-fade-in flex flex-col gap-2">
+                        <p className="text-center text-sm text-yellow-500 font-bold">
+                            Xác nhận loại {getPlayerDisplay(selectedVoteCandidate).name}?
+                        </p>
+                        <Button 
+                            variant="danger" 
+                            onClick={() => handleEliminate(selectedVoteCandidate)}
+                        >
+                            ☠️ Loại Ngay Lập Tức
+                        </Button>
+                     </div>
+                 ) : (
+                     <p className="text-center text-xs text-yellow-500/50 italic py-2">
+                         (Bấm vào một người chơi để chọn loại)
+                     </p>
+                 )}
+
+                 {myRole === Role.WHITE_HAT && !isWhiteHatGuessing && (
+                    <Button variant="secondary" onClick={() => setIsWhiteHatGuessing(true)}>
+                        🕵️ Đoán từ (Mũ Trắng)
+                    </Button>
+                 )}
+             </div>
+          </div>,
+          true // Full width for grid
+      )
+  );
+
+  const renderElimination = () => {
+      if (!eliminatedData) return null;
+      
+      const displayInfo = getPlayerDisplay(eliminatedData.seat);
+      let roleName = "Dân Thường";
+      let icon = "😭";
+      let colorClass = "text-yellow-200";
+
+      if (eliminatedData.role === Role.LIAR) { 
+          roleName = "Kẻ Nói Dối"; 
+          icon = "👺";
+          colorClass = "text-red-500";
+      }
+      if (eliminatedData.role === Role.WHITE_HAT) { 
+          roleName = "Mũ Trắng"; 
+          icon = "👻";
+          colorClass = "text-gray-300";
+      }
+
+      return renderGameCard(
+          <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 text-center animate-fade-in">
+              <div className="bg-black/30 p-6 rounded-full border-4 border-yellow-600/30">
+                 <div className="text-8xl animate-bounce">{icon}</div>
+              </div>
+              
+              <div className="space-y-2">
+                  <h2 className="text-xl font-bold text-yellow-100/80 uppercase tracking-widest">
+                      {displayInfo.name} chính là
+                  </h2>
+                  <h1 className={`text-5xl font-extrabold uppercase mt-2 drop-shadow-lg ${colorClass}`}>
+                      {roleName}
+                  </h1>
+              </div>
+
+              <div className="mt-6 w-full max-w-xs">
+                  <Button onClick={() => {
+                      if (winner) {
+                          setTurnPhase(TurnPhase.GAME_OVER);
+                      } else {
+                          // Recalculate turn order removing dead
+                          const aliveSeats = players.filter(p => p.status === 'ALIVE').map(p => p.seatIndex);
+                          setTurnOrder(aliveSeats);
+                          setCurrentTurnIndex(0);
+                          setTurnPhase(TurnPhase.DESCRIBING);
+                          setTimeLeft(45); // Reset timer
+                      }
+                  }}>
+                      {winner ? "Xem Kết Quả Chung Cuộc" : "Tiếp Tục Vòng Sau"}
+                  </Button>
+              </div>
+          </div>
+      )
+  };
+
+  const renderGameOver = () => {
+      let title = "";
+      let desc = "";
+      
+      if (winner === 'CIVILIAN') {
+          title = "Dân Thường Thắng";
+          desc = "Mọi kẻ gian đã bị loại bỏ!";
+      } else if (winner === 'BAD_GUYS') {
+          title = "Phe Nói Dối Thắng";
+          desc = "Kẻ nói dối đã áp đảo dân thường!";
+      } else if (winner === 'WHITE_HAT') {
+          title = "Mũ Trắng Thắng";
+          desc = "Mũ trắng đã đoán đúng từ khóa!";
+      }
+
+      return renderGameCard(
+          <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 text-center">
+              <div className="text-8xl">🏆</div>
+              <div>
+                  <h1 className="text-4xl font-extrabold text-yellow-400 uppercase mb-2">{title}</h1>
+                  <p className="text-yellow-100/80">{desc}</p>
+              </div>
+              <div className="bg-black/30 p-4 rounded-xl border border-yellow-900/50 w-full">
+                  <p className="text-sm text-yellow-500 uppercase font-bold mb-2">Từ khoá là</p>
+                  <p className="text-2xl font-bold text-white">{currentGame?.word}</p>
+              </div>
+              <div className="flex gap-4 w-full">
+                  <Button variant="secondary" onClick={resetGame}>Thoát</Button>
+                  <Button onClick={playAgain}>Chơi Lại (Vòng Mới)</Button>
+              </div>
+          </div>
+      )
+  };
+
+  const renderWhiteHatModal = () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-red-950 border-2 border-yellow-500 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+              <h3 className="text-xl font-bold text-white mb-4">🕵️ Đoán từ khoá</h3>
+              <input 
+                  type="text" 
+                  value={whiteHatGuess}
+                  onChange={(e) => setWhiteHatGuess(e.target.value)}
+                  placeholder="Nhập từ khoá..."
+                  className="w-full bg-black/30 border border-yellow-700 rounded-lg p-3 text-white mb-4 focus:outline-none focus:border-yellow-400"
+              />
+              <div className="flex gap-3">
+                  <Button variant="secondary" onClick={() => setIsWhiteHatGuessing(false)}>Huỷ</Button>
+                  <Button onClick={handleWhiteHatGuess}>Chốt đáp án</Button>
+              </div>
+              <p className="text-xs text-red-400 mt-2 italic">*Nếu sai bạn sẽ bị loại ngay lập tức!</p>
+          </div>
+      </div>
+  );
+
+  const renderPlaying = () => {
+    if (!currentGame) return null;
+
+    return (
+        <>
+            {turnPhase === TurnPhase.LOBBY && renderLobby()}
+            {turnPhase === TurnPhase.REVEAL && renderReveal()}
+            {turnPhase === TurnPhase.DESCRIBING && renderDescribing()}
+            {turnPhase === TurnPhase.VOTING && renderVoting()}
+            {turnPhase === TurnPhase.ELIMINATION && renderElimination()}
+            {turnPhase === TurnPhase.GAME_OVER && renderGameOver()}
+            
+            {isWhiteHatGuessing && renderWhiteHatModal()}
+            {renderRoleReviewModal()}
+            <FloatingRoleButton />
+        </>
     );
   };
 

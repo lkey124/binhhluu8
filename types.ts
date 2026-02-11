@@ -2,7 +2,16 @@ export enum GamePhase {
   PROFILE = 'PROFILE',
   WELCOME = 'WELCOME',
   HOST_SETUP = 'HOST_SETUP',
-  PLAYING = 'PLAYING',
+  PLAYING = 'PLAYING', // General container, internal phases handled in App state
+}
+
+export enum TurnPhase {
+  LOBBY = 'LOBBY',
+  REVEAL = 'REVEAL',
+  DESCRIBING = 'DESCRIBING',
+  VOTING = 'VOTING',
+  ELIMINATION = 'ELIMINATION',
+  GAME_OVER = 'GAME_OVER'
 }
 
 export interface UserProfile {
@@ -23,7 +32,12 @@ export interface GameData {
   liarCount: number;
   whiteHatCount: number;
   timestamp: number;
-  // Roles are derived deterministically from the code/seed, not stored explicitly
+}
+
+export interface PlayerState {
+  seatIndex: number; // 0-based
+  status: 'ALIVE' | 'ELIMINATED';
+  role?: Role; // Only visible if revealed/eliminated
 }
 
 export interface TopicCategory {
