@@ -77,10 +77,13 @@ const App = () => {
   const [roundNumber, setRoundNumber] = useState(1);
   const [timeLeft, setTimeLeft] = useState(45);
 
-  // Review / Checking Mode (New Feature)
+  // Review / Checking Mode
   const [isReviewingAll, setIsReviewingAll] = useState(false); // To toggle the "Check Identity" dashboard
   const [reviewTarget, setReviewTarget] = useState<PlayerState | null>(null); // Specific player being reviewed
   
+  // Voting
+  const [voteTarget, setVoteTarget] = useState<number | null>(null);
+
   // Elimination & Win
   const [eliminatedData, setEliminatedData] = useState<{seat: number, role: Role} | null>(null);
   const [winner, setWinner] = useState<'CIVILIAN' | 'BAD_GUYS' | 'WHITE_HAT' | null>(null);
@@ -366,25 +369,24 @@ const App = () => {
           setCurrentTurnIndex(prev => prev + 1);
           setTimeLeft(45);
       } else {
+          setVoteTarget(null);
           setTurnPhase(TurnPhase.VOTING);
       }
   };
 
-  const handleVoteClick = (seatIndex: number) => {
-      // Only Host or Offline
-      if (gameMode === 'ONLINE_GUEST') return;
-
-      const p = players[seatIndex];
-      if (confirm(`Bạn chắc chắn muốn loại ${p.name}?`)) {
-          if (p.role === Role.WHITE_HAT) {
-              alert(`${p.name} là Mũ Trắng! Họ có cơ hội đoán từ.`);
-              setWhiteHatGuesserSeat(seatIndex);
-              setIsLastStand(true);
-              setIsWhiteHatGuessing(true);
-          } else {
-              performElimination(seatIndex);
-          }
+  const handleConfirmElimination = () => {
+      if (voteTarget === null) return;
+      const p = players[voteTarget];
+      
+      if (p.role === Role.WHITE_HAT) {
+          alert(`${p.name} là Mũ Trắng! Họ có cơ hội đoán từ.`);
+          setWhiteHatGuesserSeat(voteTarget);
+          setIsLastStand(true);
+          setIsWhiteHatGuessing(true);
+      } else {
+          performElimination(voteTarget);
       }
+      setVoteTarget(null);
   };
 
   const performElimination = (seatIndex: number) => {
@@ -693,7 +695,6 @@ const App = () => {
                    <div className={`w-full rounded-2xl p-8 border-4 text-center shadow-inner ${cardColor}`}>
                         <div className="text-5xl mb-4">{icon}</div>
                         
-                        {/* Explicit Role Display Logic to fix user bug */}
                         {currentPlayer.role === Role.CIVILIAN ? (
                             <>
                                 <h3 className="text-lg font-bold text-yellow-400/80 mb-2 uppercase">Từ khoá</h3>
@@ -763,32 +764,51 @@ const App = () => {
       <GameCard fullWidth>
           <h2 className="text-2xl font-bold text-red-400 text-center mb-2 uppercase">Biểu Quyết</h2>
           <p className="text-center text-yellow-200/60 text-sm mb-6">
-              {gameMode === 'ONLINE_GUEST' ? 'Chủ phòng đang thực hiện biểu quyết' : 'Chọn người bị loại HOẶC qua vòng tiếp theo'}
+              {gameMode === 'ONLINE_GUEST' ? 'Chủ phòng đang thực hiện biểu quyết' : 'Chạm vào người chơi để chọn'}
           </p>
           
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-              {players.map(p => (
+              {players.map(p => {
+                  const isSelected = voteTarget === p.seatIndex;
+                  return (
                   <button 
                     key={p.seatIndex}
                     disabled={p.status === 'ELIMINATED' || gameMode === 'ONLINE_GUEST'}
-                    onClick={() => handleVoteClick(p.seatIndex)}
-                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
+                    onClick={() => setVoteTarget(p.seatIndex)}
+                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all relative ${
                         p.status === 'ELIMINATED' 
                         ? 'bg-black/50 border-gray-800 opacity-50 grayscale cursor-not-allowed' 
-                        : (gameMode !== 'ONLINE_GUEST' ? 'bg-red-900/40 border-yellow-800/50 hover:bg-red-800 hover:border-red-500' : 'bg-red-900/40 border-yellow-800/50')
+                        : isSelected
+                            ? 'bg-red-800 border-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.4)] scale-105 z-10'
+                            : (gameMode !== 'ONLINE_GUEST' ? 'bg-red-900/40 border-yellow-800/50 hover:bg-red-800/80 hover:border-yellow-600' : 'bg-red-900/40 border-yellow-800/50')
                     }`}
                   >
+                      {isSelected && <div className="absolute top-2 right-2 text-yellow-400"><MagicIcon/></div>}
                       <span className="text-4xl">{p.status === 'ELIMINATED' ? '💀' : p.avatar}</span>
-                      <span className="font-bold text-yellow-100">{p.name}</span>
+                      <span className={`font-bold ${isSelected ? 'text-yellow-300' : 'text-yellow-100'}`}>{p.name}</span>
                   </button>
-              ))}
+                  );
+              })}
           </div>
 
           {gameMode !== 'ONLINE_GUEST' && (
-              <div className="flex justify-center">
+              <div className="flex flex-col gap-3 items-center">
+                   {voteTarget !== null ? (
+                       <Button 
+                         variant="danger" 
+                         className="animate-bounce-short"
+                         onClick={handleConfirmElimination}
+                       >
+                           💀 Loại bỏ {players[voteTarget].name}
+                       </Button>
+                   ) : (
+                       <div className="h-12"></div> // Spacer
+                   )}
+                   
                    <Button variant="secondary" onClick={() => {
                        setRoundNumber(prev => prev + 1);
                        startDescribingPhase();
+                       setVoteTarget(null);
                    }}>
                        <NextIcon /> Không ai bị loại (Vòng tiếp theo)
                    </Button>
@@ -796,9 +816,6 @@ const App = () => {
           )}
       </GameCard>
   );
-
-  // Reuse existing render components for Elimination/GameOver/WhiteHat (logic mostly same)
-  // Just ensure buttons are hidden for guests if needed
 
   const renderElimination = () => {
       if (!eliminatedData) return null;
