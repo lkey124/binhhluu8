@@ -38,6 +38,8 @@ export interface PlayerState {
   seatIndex: number; // 0-based
   status: 'ALIVE' | 'ELIMINATED';
   role?: Role; // Only visible if revealed/eliminated
+  profile?: UserProfile; // Synced profile data
+  isReady?: boolean; // For the reveal phase sync
 }
 
 export interface TopicCategory {
@@ -45,3 +47,12 @@ export interface TopicCategory {
   name: string;
   words: string[];
 }
+
+// --- P2P Message Types ---
+export type P2PMessage = 
+  | { type: 'SYNC_STATE'; payload: any } // Host sends full state to guests
+  | { type: 'JOIN_REQUEST'; payload: UserProfile } // Guest -> Host (Not used directly via data, implicit via connection)
+  | { type: 'SIT_REQUEST'; payload: { seatIndex: number; profile: UserProfile } } // Guest -> Host
+  | { type: 'PLAYER_READY'; payload: { seatIndex: number } } // Guest -> Host (Finished revealing)
+  | { type: 'ACTION_VOTE'; payload: { voterSeat: number; targetSeat: number } } // Guest -> Host
+  | { type: 'HOST_PHASE_CHANGE'; payload: { phase: TurnPhase; data?: any } }; // Host -> Guests
