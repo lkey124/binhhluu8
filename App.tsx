@@ -479,7 +479,7 @@ const App = () => {
           <span className="text-3xl">🧧</span>
           <div>
             <h1 className="text-xl font-bold font-serif text-yellow-400 leading-none">Kẻ Nói Dối</h1>
-            <span className="text-[6px] text-yellow-200/60 uppercase tracking-widest">
+            <span className="text-[10px] text-yellow-200/60 uppercase tracking-widest">
                 {gameMode === 'OFFLINE' ? 'facebook.com/binhluuuu' : `ROOM: ${roomId}`}
             </span>
           </div>
