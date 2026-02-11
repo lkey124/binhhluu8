@@ -1,13 +1,12 @@
+
 export enum GamePhase {
-  PROFILE = 'PROFILE',
-  WELCOME = 'WELCOME',
-  HOST_SETUP = 'HOST_SETUP',
-  PLAYING = 'PLAYING', // General container, internal phases handled in App state
+  SETUP = 'SETUP', // Config players, topic
+  NAME_SETUP = 'NAME_SETUP', // Enter names
+  PLAYING = 'PLAYING', // Main game loop
 }
 
 export enum TurnPhase {
-  LOBBY = 'LOBBY',
-  REVEAL = 'REVEAL',
+  REVEAL = 'REVEAL', // Pass and play reveal
   DESCRIBING = 'DESCRIBING',
   VOTING = 'VOTING',
   ELIMINATION = 'ELIMINATION',
@@ -20,9 +19,9 @@ export interface UserProfile {
 }
 
 export enum Role {
-  CIVILIAN = 'CIVILIAN', // Dân thường
-  LIAR = 'LIAR',         // Kẻ nói dối
-  WHITE_HAT = 'WHITE_HAT' // Mũ trắng (Không biết gì cả)
+  CIVILIAN = 'CIVILIAN',
+  LIAR = 'LIAR',
+  WHITE_HAT = 'WHITE_HAT'
 }
 
 export interface GameData {
@@ -35,11 +34,11 @@ export interface GameData {
 }
 
 export interface PlayerState {
-  seatIndex: number; // 0-based
+  seatIndex: number;
+  name: string;
+  avatar: string;
   status: 'ALIVE' | 'ELIMINATED';
-  role?: Role; // Only visible if revealed/eliminated
-  profile?: UserProfile; // Synced profile data
-  isReady?: boolean; // For the reveal phase sync
+  role: Role; // In local mode, we store role directly but hide it in UI
 }
 
 export interface TopicCategory {
@@ -48,11 +47,9 @@ export interface TopicCategory {
   words: string[];
 }
 
-// --- P2P Message Types ---
-export type P2PMessage = 
-  | { type: 'SYNC_STATE'; payload: any } // Host sends full state to guests
-  | { type: 'JOIN_REQUEST'; payload: UserProfile } // Guest -> Host (Not used directly via data, implicit via connection)
-  | { type: 'SIT_REQUEST'; payload: { seatIndex: number; profile: UserProfile } } // Guest -> Host
-  | { type: 'PLAYER_READY'; payload: { seatIndex: number } } // Guest -> Host (Finished revealing)
-  | { type: 'ACTION_VOTE'; payload: { voterSeat: number; targetSeat: number } } // Guest -> Host
-  | { type: 'HOST_PHASE_CHANGE'; payload: { phase: TurnPhase; data?: any } }; // Host -> Guests
+export interface P2PMessage {
+  type: string;
+  payload?: any;
+  sender?: string;
+  timestamp?: number;
+}
