@@ -1,4 +1,5 @@
 
+
 export enum GamePhase {
   SETUP = 'SETUP', // Config players, topic
   NAME_SETUP = 'NAME_SETUP', // Enter names
@@ -27,6 +28,7 @@ export enum Role {
 export interface GameData {
   topic: string;
   word: string;
+  whiteHatWord?: string;
   totalPlayers: number;
   liarCount: number;
   whiteHatCount: number;
@@ -38,7 +40,7 @@ export interface PlayerState {
   name: string;
   avatar: string;
   status: 'ALIVE' | 'ELIMINATED';
-  role: Role; // In local mode, we store role directly but hide it in UI
+  role: Role;
 }
 
 export interface TopicCategory {
@@ -50,6 +52,6 @@ export interface TopicCategory {
 export interface P2PMessage {
   type: string;
   payload?: any;
-  sender?: string;
+  senderId?: string;
   timestamp?: number;
 }
